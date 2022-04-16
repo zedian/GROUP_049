@@ -1,5 +1,5 @@
 import gym
-import jbw
+#import jbw
 import argparse
 import importlib
 import time
@@ -26,6 +26,7 @@ def evaluate_agent(agent, env, n_episodes_to_evaluate):
     while not done:
       action = agent.act(curr_obs, mode='eval')
       next_obs, reward, done, _ = env.step(action)
+      env.render()
       acc_reward += reward
       curr_obs = next_obs
     array_of_acc_rewards.append(acc_reward)
@@ -86,7 +87,7 @@ def train_agent(agent,
 if __name__ == '__main__':
     
   parser = argparse.ArgumentParser(description='')
-  parser.add_argument('--group', type=str, default='GROUP1', help='group directory')
+  parser.add_argument('--group', type=str, default='GROUP_049', help='group directory')
   args = parser.parse_args()
 
   path = './'+args.group+'/'
