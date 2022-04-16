@@ -123,11 +123,11 @@ class Agent:
         for target_param, local_param in zip(target_network.parameters(), local_network.parameters()):
             target_param.data.copy_(tau * local_param.data + (1 - tau) * target_param.data)
 
-    def save_weights(self):
-        torch.save(self.policy_network.state_dict(), self.env_name + "_weights.pth")
+    def save_weights(self, root_path):
+        torch.save(self.policy_network.state_dict(), root_path + "weights.pth")
 
-    def load_weights(self):
-        self.policy_network.load_state_dict(torch.load(self.env_name + "_weights.pth"))
+    def load_weights(self, root_path):
+        self.policy_network.load_state_dict(torch.load(root_path + "weights.pth"))
 
     def set_to_eval_mode(self):
         self.policy_network.eval()

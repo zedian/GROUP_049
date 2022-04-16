@@ -26,7 +26,6 @@ def evaluate_agent(agent, env, n_episodes_to_evaluate):
     while not done:
       action = agent.act(curr_obs, mode='eval')
       next_obs, reward, done, _ = env.step(action)
-      env.render()
       acc_reward += reward
       curr_obs = next_obs
     array_of_acc_rewards.append(acc_reward)
@@ -51,7 +50,7 @@ def train_agent(agent,
                 evaluation_freq,
                 n_episodes_to_evaluate):
 
-  seed = 0
+  seed = 5
   random.seed(seed)
   np.random.seed(seed)
   torch.manual_seed(seed)
@@ -81,6 +80,7 @@ def train_agent(agent,
         print('timestep: {ts}, acc_reward: {acr:.2f}'.format(ts=timestep, acr=mean_acc_rewards))
         array_of_mean_acc_rewards.append(mean_acc_rewards)
 
+  agent.save_weights("Hopper-v2/")
   return array_of_mean_acc_rewards
 
 
@@ -110,9 +110,9 @@ if __name__ == '__main__':
   agent = agent_module.Agent(env_specs)
   
   # Note these can be environment specific and you are free to experiment with what works best for you
-  total_timesteps = 2000000
-  evaluation_freq = 1000
-  n_episodes_to_evaluate = 20
+  total_timesteps = 1000000
+  evaluation_freq = 2000
+  n_episodes_to_evaluate = 25
 
   learning_curve = train_agent(agent, env, env_eval, total_timesteps, evaluation_freq, n_episodes_to_evaluate)
 
