@@ -87,7 +87,7 @@ def train_agent(agent,
 if __name__ == '__main__':
     
   parser = argparse.ArgumentParser(description='')
-  parser.add_argument('--group', type=str, default='GROUP_049', help='group directory')
+  parser.add_argument('--group', type=str, default='GROUP_MJ1', help='group directory')
   args = parser.parse_args()
 
   path = './'+args.group+'/'
@@ -108,6 +108,7 @@ if __name__ == '__main__':
     env_specs = {'observation_space': env.observation_space, 'action_space': env.action_space}
   agent_module = importlib.import_module(args.group+'.agent')
   agent = agent_module.Agent(env_specs)
+  agent.load_weights("Hopper-v2/")
   
   # Note these can be environment specific and you are free to experiment with what works best for you
   total_timesteps = 1000000
