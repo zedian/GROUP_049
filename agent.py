@@ -1,7 +1,7 @@
 import numpy as np
-from GROUP_049.model import PolicyNetwork, QvalueNetwork, ValueNetwork
+from model import PolicyNetwork, QvalueNetwork, ValueNetwork
 import torch
-from GROUP_049.replay_memory import Memory, Transition
+from replay_memory import Memory, Transition
 from torch import from_numpy
 from torch.optim.adam import Adam
 
