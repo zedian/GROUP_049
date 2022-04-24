@@ -26,12 +26,14 @@ class Agent:
         self.memory = Memory(memory_size=self.memory_size)
 
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
-
+        
+        self.hypernet = MultiLinearHyperNetwork(self.n_states, self.n_states)
+        
         self.policy_network = PolicyNetwork(n_states=self.n_states, n_actions=self.n_actions,
-                                            action_bounds=self.action_bounds).to(self.device)
+                                        action_bounds=self.action_bounds, hypernet=self.hypernet).to(self.device)
         self.q_value_network1 = QvalueNetwork(n_states=self.n_states, n_actions=self.n_actions).to(self.device)
         self.q_value_network2 = QvalueNetwork(n_states=self.n_states, n_actions=self.n_actions).to(self.device)
-        self.value_network = ValueNetwork(n_states=self.n_states).to(self.device)
+        self.value_network = ValueNetwork(n_states=self.n_states, hypernet=self.hypernet).to(self.device)
         self.value_target_network = ValueNetwork(n_states=self.n_states).to(self.device)
         self.value_target_network.load_state_dict(self.value_network.state_dict())
         self.value_target_network.eval()
@@ -162,9 +164,44 @@ def init_weight(layer, initializer="he normal"):
     elif initializer == "he normal":
         nn.init.kaiming_normal_(layer.weight)
 
+class LinearHyperNetwork(nn.Module):
+    def __init__(self, input_dim, output_dim):
+        super(LinearHyperNetwork, self).__init__()
+        self.input_dim = input_dim
+        self.output_dim = output_dim
+        
+        self.net = nn.Linear(in_features=self.input_dim, out_features=self.output_dim)
+        
+        init_weight(self.net)
+        self.net.bias.data.zero_()
+    
+    def forward(self, states):
+        return self.net(x)
+
+class MultiLinearHyperNetwork(nn.Module):
+    def __init__(self, input_dim, output_dim):
+        super(MultiLinearHyperNetwork, self).__init__()
+        self.input_dim = input_dim
+        self.output_dim = output_dim
+        
+        self.hidden1 = nn.Linear(in_features=self.input_dim, out_features=4*self.output_dim)
+        self.hidden2 = nn.Linear(in_features=4*self.output_dim, out_features=2*self.output_dim)
+        self.out = nn.Linear(in_features=2*self.output_dim, out_features=self.output_dim)
+        
+        init_weight(self.hidden1)
+        init_weight(self.hidden2)
+        init_weight(self.out)
+        self.hidden1.bias.data.zero_()
+        self.hidden2.bias.data.zero_()
+        self.out.bias.data.zero_()
+    
+    def forward(self, states):
+        x = F.relu(self.hidden1(states))
+        x = F.relu(self.hidden2(x))
+        return self.out(x)
 
 class ValueNetwork(nn.Module):
-    def __init__(self, n_states, n_hidden_filters=256):
+    def __init__(self, n_states, hypernet=None, n_hidden_filters=256):
         super(ValueNetwork, self).__init__()
         self.n_states = n_states
         self.n_hidden_filters = n_hidden_filters
@@ -172,9 +209,12 @@ class ValueNetwork(nn.Module):
         self.hidden1 = nn.Linear(in_features=self.n_states, out_features=self.n_hidden_filters)
         init_weight(self.hidden1)
         self.hidden1.bias.data.zero_()
-        self.hidden2 = nn.Linear(in_features=self.n_hidden_filters, out_features=self.n_hidden_filters)
-        init_weight(self.hidden2)
-        self.hidden2.bias.data.zero_()
+        if hypernet != None:
+            self.hidden2 = hypernet
+        else
+            self.hidden2 = nn.Linear(in_features=self.n_hidden_filters, out_features=self.n_hidden_filters)
+            init_weight(self.hidden2)
+            self.hidden2.bias.data.zero_()
         self.value = nn.Linear(in_features=self.n_hidden_filters, out_features=1)
         init_weight(self.value, initializer="xavier uniform")
         self.value.bias.data.zero_()
@@ -210,7 +250,7 @@ class QvalueNetwork(nn.Module):
 
 
 class PolicyNetwork(nn.Module):
-    def __init__(self, n_states, n_actions, action_bounds, n_hidden_filters=256):
+    def __init__(self, n_states, n_actions, action_bounds, hypernet, n_hidden_filters=256):
         super(PolicyNetwork, self).__init__()
         self.n_states = n_states
         self.n_hidden_filters = n_hidden_filters
@@ -220,9 +260,12 @@ class PolicyNetwork(nn.Module):
         self.hidden1 = nn.Linear(in_features=self.n_states, out_features=self.n_hidden_filters)
         init_weight(self.hidden1)
         self.hidden1.bias.data.zero_()
-        self.hidden2 = nn.Linear(in_features=self.n_hidden_filters, out_features=self.n_hidden_filters)
-        init_weight(self.hidden2)
-        self.hidden2.bias.data.zero_()
+        if hypernet != None:
+            self.value = hypernet
+        else
+            self.hidden2 = nn.Linear(in_features=self.n_hidden_filters, out_features=self.n_hidden_filters)
+            init_weight(self.hidden2)
+            self.hidden2.bias.data.zero_()
 
         self.mu = nn.Linear(in_features=self.n_hidden_filters, out_features=self.n_actions)
         init_weight(self.mu, initializer="xavier uniform")

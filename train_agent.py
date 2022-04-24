@@ -108,10 +108,10 @@ if __name__ == '__main__':
     env_specs = {'observation_space': env.observation_space, 'action_space': env.action_space}
   agent_module = importlib.import_module(args.group+'.agent')
   agent = agent_module.Agent(env_specs)
-  agent.load_weights("Hopper-v2/")
+#   agent.load_weights("Hopper-v2/")
   
   # Note these can be environment specific and you are free to experiment with what works best for you
-  total_timesteps = 1000000
+  total_timesteps = 2500000
   evaluation_freq = 2000
   n_episodes_to_evaluate = 25
 
