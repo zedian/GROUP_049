@@ -100,7 +100,7 @@ class Agent:
             policy_loss = (self.alpha * log_probs - q).mean()
             
             self.policy_opt.zero_grad()
-            policy_loss.backward()
+            policy_loss.backward(retain_graph=True)
             self.policy_opt.step()
 
             self.value_opt.zero_grad()
@@ -185,13 +185,17 @@ class WeightNet(nn.Module):
         self.input_dim = input_dim
         self.output_dim = output_dim
         
-        self.left_net = nn.Linear(in_features=self.input_dim, out_features = self.output_dim)
-        self.right_net = nn.Linear(in_features=self.input_dim, out_features = self.output_dim)
+        self.explode = nn.Linear(in_features = self.input_dim, out_features = 512)
+        self.left_net = nn.Linear(in_features=512, out_features = self.output_dim)
+        self.right_net = nn.Linear(in_features=512, out_features = self.output_dim)
+        init_weight(self.explode)
+        self.explode.bias.data.zero_()
         init_weight(self.left_net)
         self.left_net.bias.data.zero_()
         init_weight(self.right_net)
         self.right_net.bias.data.zero_()
     def forward(self, states):
+        states = F.relu(self.explode(states))
         left = self.left_net(states)
         right = self.right_net(states)
         
@@ -240,7 +244,7 @@ class ValueNetwork(nn.Module):
         self.value.bias.data.zero_()
 
     def forward(self, states, weight=None):
-#         weight = None
+        weight = None
         x = F.relu(self.hidden1(states))
         if weight == None:
             x = F.relu(self.hidden2(x))

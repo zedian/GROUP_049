@@ -111,7 +111,7 @@ if __name__ == '__main__':
 #   agent.load_weights("Hopper-v2/")
   
   # Note these can be environment specific and you are free to experiment with what works best for you
-  total_timesteps = 2500000
+  total_timesteps = 1500000
   evaluation_freq = 2000
   n_episodes_to_evaluate = 25
 
