@@ -26,14 +26,13 @@ class Agent:
         self.memory = Memory(memory_size=self.memory_size)
 
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
-        self.hypernet= None
-        self.hypernetwork = WeightNet(11, 256).to(self.device)
+#         self.hypernetwork = WeightNet(11, 256).to(self.device)
         
         self.policy_network = PolicyNetwork(n_states=self.n_states, n_actions=self.n_actions,
-                                        action_bounds=self.action_bounds, hypernet=self.hypernet).to(self.device)
+                                        action_bounds=self.action_bounds).to(self.device)
         self.q_value_network1 = QvalueNetwork(n_states=self.n_states, n_actions=self.n_actions).to(self.device)
         self.q_value_network2 = QvalueNetwork(n_states=self.n_states, n_actions=self.n_actions).to(self.device)
-        self.value_network = ValueNetwork(n_states=self.n_states, hypernet=self.hypernet).to(self.device)
+        self.value_network = ValueNetwork(n_states=self.n_states).to(self.device)
         self.value_target_network = ValueNetwork(n_states=self.n_states).to(self.device)
         self.value_target_network.load_state_dict(self.value_network.state_dict(), strict=False)
         self.value_target_network.eval()
@@ -41,6 +40,7 @@ class Agent:
         self.value_loss = torch.nn.MSELoss()
         self.q_value_loss = torch.nn.MSELoss()
 
+#         self.hyper_opt = Adam(self.hypernetwork.parameters(), lr=self.lr)
         self.value_opt = Adam(self.value_network.parameters(), lr=self.lr)
         self.q_value1_opt = Adam(self.q_value_network1.parameters(), lr=self.lr)
         self.q_value2_opt = Adam(self.q_value_network2.parameters(), lr=self.lr)
@@ -78,14 +78,15 @@ class Agent:
             states, rewards, dones, actions, next_states = self.unpack(batch)
 
             # Calculating the value target
-            hyper_weights = self.hypernetwork(states)
-            reparam_actions, log_probs = self.policy_network.sample_or_likelihood(states, hyper_weights)
+#             hyper_weights = self.hypernetwork(states)
+            reparam_actions, log_probs = self.policy_network.sample_or_likelihood(states)
+#             print(reparam_actions)
             q1 = self.q_value_network1(states, reparam_actions)
             q2 = self.q_value_network2(states, reparam_actions)
             q = torch.min(q1, q2)
             target_value = q.detach() - self.alpha * log_probs.detach()
 
-            value = self.value_network(states, hyper_weights)
+            value = self.value_network(states)
             value_loss = self.value_loss(value, target_value)
 
             # Calculating the Q-Value target
@@ -99,10 +100,22 @@ class Agent:
 
             policy_loss = (self.alpha * log_probs - q).mean()
             
+#             hyper_loss = policy_loss + value_loss
+            
+#             self.policy_opt.zero_grad()
+#             self.hyper_opt.zero_grad()
+#             self.value_opt.zero_grad()
+#             hyper_loss.backward(retain_graph=True)
+#             self.hyper_opt.step()
+#             self.policy_opt.step()
+#             self.value_opt.step()
+            
+#             self.hyper_opt.zero_grad()
             self.policy_opt.zero_grad()
-            policy_loss.backward(retain_graph=True)
+            policy_loss.backward()
+#             self.hyper_opt.step()
             self.policy_opt.step()
-
+           
             self.value_opt.zero_grad()
             value_loss.backward()
             self.value_opt.step()
@@ -123,7 +136,7 @@ class Agent:
     def act(self, states, mode="train"):
         states = np.expand_dims(states, axis=0)
         states = from_numpy(states).float().to(self.device)
-        action, _ = self.policy_network.sample_or_likelihood(states, self.hypernetwork(states))
+        action, _ = self.policy_network.sample_or_likelihood(states)
         return action.detach().cpu().numpy()[0]
 
     @staticmethod
@@ -224,7 +237,7 @@ class MultiLinearHyperNetwork(nn.Module):
         return self.out(x)
 
 class ValueNetwork(nn.Module):
-    def __init__(self, n_states, hypernet=None, n_hidden_filters=256):
+    def __init__(self, n_states, n_hidden_filters=256):
         super(ValueNetwork, self).__init__()
         self.n_states = n_states
         self.n_hidden_filters = n_hidden_filters
@@ -232,13 +245,10 @@ class ValueNetwork(nn.Module):
         self.hidden1 = nn.Linear(in_features=self.n_states, out_features=self.n_hidden_filters)
         init_weight(self.hidden1)
         self.hidden1.bias.data.zero_()
-        if hypernet != None:
-            self.hidden2 = hypernet
-        else:
-            self.hidden2 = nn.Linear(in_features=self.n_hidden_filters, out_features=self.n_hidden_filters)
-            init_weight(self.hidden2)
-            self.hidden2.bias.data.zero_()
-            print("HI")
+
+        self.hidden2 = nn.Linear(in_features=self.n_hidden_filters, out_features=self.n_hidden_filters)
+        init_weight(self.hidden2)
+        self.hidden2.bias.data.zero_()
         self.value = nn.Linear(in_features=self.n_hidden_filters, out_features=1)
         init_weight(self.value, initializer="xavier uniform")
         self.value.bias.data.zero_()
@@ -278,7 +288,7 @@ class QvalueNetwork(nn.Module):
 
 
 class PolicyNetwork(nn.Module):
-    def __init__(self, n_states, n_actions, action_bounds, hypernet, n_hidden_filters=256):
+    def __init__(self, n_states, n_actions, action_bounds, n_hidden_filters=256):
         super(PolicyNetwork, self).__init__()
         self.n_states = n_states
         self.n_hidden_filters = n_hidden_filters
@@ -288,12 +298,24 @@ class PolicyNetwork(nn.Module):
         self.hidden1 = nn.Linear(in_features=self.n_states, out_features=self.n_hidden_filters)
         init_weight(self.hidden1)
         self.hidden1.bias.data.zero_()
-        if hypernet != None:
-            self.hidden2 = hypernet
-        else:
-            self.hidden2 = nn.Linear(in_features=self.n_hidden_filters, out_features=self.n_hidden_filters)
-            init_weight(self.hidden2)
-            self.hidden2.bias.data.zero_()
+        
+        self.key = nn.Linear(in_features=self.n_hidden_filters, out_features=int(self.n_hidden_filters))
+        init_weight(self.key)
+        self.key.bias.data.zero_()
+
+        self.query = nn.Linear(in_features=self.n_hidden_filters, out_features=int(self.n_hidden_filters))
+        init_weight(self.query)
+        self.query.bias.data.zero_()
+        
+        self.value = nn.Linear(in_features=int(self.n_hidden_filters), out_features=self.n_hidden_filters)
+        init_weight(self.value)
+        self.value.bias.data.zero_()
+        
+        self.attention = nn.MultiheadAttention(self.n_hidden_filters, 8)
+        
+        self.hidden2 = nn.Linear(in_features=self.n_hidden_filters, out_features=self.n_hidden_filters)
+        init_weight(self.hidden2)
+        self.hidden2.bias.data.zero_()
 
         self.mu = nn.Linear(in_features=self.n_hidden_filters, out_features=self.n_actions)
         init_weight(self.mu, initializer="xavier uniform")
@@ -303,9 +325,16 @@ class PolicyNetwork(nn.Module):
         init_weight(self.log_std, initializer="xavier uniform")
         self.log_std.bias.data.zero_()
 
-    def forward(self, states, weight):
+    def forward(self, states, weight=None):
         x = F.relu(self.hidden1(states))
-        x = F.relu(x@weight)
+        q = self.query(x)
+        k = self.key(x)
+        v = self.value(x)
+        attn = self.attention(q, k, v)
+        if weight == None:
+            x = F.relu(self.hidden2(x))
+        else:
+            x = F.relu(x@weight)
 
         mu = self.mu(x)
         log_std = self.log_std(x)
@@ -313,7 +342,7 @@ class PolicyNetwork(nn.Module):
         dist = Normal(mu, std)
         return dist
 
-    def sample_or_likelihood(self, states, weight):
+    def sample_or_likelihood(self, states, weight=None):
         dist = self(states, weight)
         # Reparameterization trick
         u = dist.rsample()
