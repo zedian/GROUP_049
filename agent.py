@@ -26,8 +26,8 @@ class Agent:
         self.memory = Memory(memory_size=self.memory_size)
 
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
-        
-        self.hypernet = MultiLinearHyperNetwork(self.n_states, self.n_states)
+        self.hypernet= None
+        self.hypernetwork = WeightNet(11, 256).to(self.device)
         
         self.policy_network = PolicyNetwork(n_states=self.n_states, n_actions=self.n_actions,
                                         action_bounds=self.action_bounds, hypernet=self.hypernet).to(self.device)
@@ -35,7 +35,7 @@ class Agent:
         self.q_value_network2 = QvalueNetwork(n_states=self.n_states, n_actions=self.n_actions).to(self.device)
         self.value_network = ValueNetwork(n_states=self.n_states, hypernet=self.hypernet).to(self.device)
         self.value_target_network = ValueNetwork(n_states=self.n_states).to(self.device)
-        self.value_target_network.load_state_dict(self.value_network.state_dict())
+        self.value_target_network.load_state_dict(self.value_network.state_dict(), strict=False)
         self.value_target_network.eval()
 
         self.value_loss = torch.nn.MSELoss()
@@ -78,19 +78,20 @@ class Agent:
             states, rewards, dones, actions, next_states = self.unpack(batch)
 
             # Calculating the value target
-            reparam_actions, log_probs = self.policy_network.sample_or_likelihood(states)
+            hyper_weights = self.hypernetwork(states)
+            reparam_actions, log_probs = self.policy_network.sample_or_likelihood(states, hyper_weights)
             q1 = self.q_value_network1(states, reparam_actions)
             q2 = self.q_value_network2(states, reparam_actions)
             q = torch.min(q1, q2)
             target_value = q.detach() - self.alpha * log_probs.detach()
 
-            value = self.value_network(states)
+            value = self.value_network(states, hyper_weights)
             value_loss = self.value_loss(value, target_value)
 
             # Calculating the Q-Value target
             with torch.no_grad():
                 target_q = self.reward_scale * rewards + \
-                           self.gamma * self.value_target_network(next_states) * (1 - dones)
+                           self.gamma * self.value_target_network(next_states, None) * (1 - dones)
             q1 = self.q_value_network1(states, actions)
             q2 = self.q_value_network2(states, actions)
             q1_loss = self.q_value_loss(q1, target_q)
@@ -99,7 +100,7 @@ class Agent:
             policy_loss = (self.alpha * log_probs - q).mean()
             
             self.policy_opt.zero_grad()
-            policy_loss.backward()
+            policy_loss.backward(retain_graph=True)
             self.policy_opt.step()
 
             self.value_opt.zero_grad()
@@ -122,7 +123,7 @@ class Agent:
     def act(self, states, mode="train"):
         states = np.expand_dims(states, axis=0)
         states = from_numpy(states).float().to(self.device)
-        action, _ = self.policy_network.sample_or_likelihood(states)
+        action, _ = self.policy_network.sample_or_likelihood(states, self.hypernetwork(states))
         return action.detach().cpu().numpy()[0]
 
     @staticmethod
@@ -177,6 +178,28 @@ class LinearHyperNetwork(nn.Module):
     
     def forward(self, states):
         return self.net(x)
+    
+class WeightNet(nn.Module):
+    def __init__(self, input_dim, output_dim):
+        super(WeightNet, self).__init__()
+        self.input_dim = input_dim
+        self.output_dim = output_dim
+        
+        self.explode = nn.Linear(in_features = self.input_dim, out_features = 512)
+        self.left_net = nn.Linear(in_features=512, out_features = self.output_dim)
+        self.right_net = nn.Linear(in_features=512, out_features = self.output_dim)
+        init_weight(self.explode)
+        self.explode.bias.data.zero_()
+        init_weight(self.left_net)
+        self.left_net.bias.data.zero_()
+        init_weight(self.right_net)
+        self.right_net.bias.data.zero_()
+    def forward(self, states):
+        states = F.relu(self.explode(states))
+        left = self.left_net(states)
+        right = self.right_net(states)
+        
+        return torch.einsum('bp, bq->bpq', left, right)[0]
 
 class MultiLinearHyperNetwork(nn.Module):
     def __init__(self, input_dim, output_dim):
@@ -211,17 +234,22 @@ class ValueNetwork(nn.Module):
         self.hidden1.bias.data.zero_()
         if hypernet != None:
             self.hidden2 = hypernet
-        else
+        else:
             self.hidden2 = nn.Linear(in_features=self.n_hidden_filters, out_features=self.n_hidden_filters)
             init_weight(self.hidden2)
             self.hidden2.bias.data.zero_()
+            print("HI")
         self.value = nn.Linear(in_features=self.n_hidden_filters, out_features=1)
         init_weight(self.value, initializer="xavier uniform")
         self.value.bias.data.zero_()
 
-    def forward(self, states):
+    def forward(self, states, weight=None):
+        weight = None
         x = F.relu(self.hidden1(states))
-        x = F.relu(self.hidden2(x))
+        if weight == None:
+            x = F.relu(self.hidden2(x))
+        else:
+            x = F.relu(x@weight)
         return self.value(x)
 
 
@@ -261,8 +289,8 @@ class PolicyNetwork(nn.Module):
         init_weight(self.hidden1)
         self.hidden1.bias.data.zero_()
         if hypernet != None:
-            self.value = hypernet
-        else
+            self.hidden2 = hypernet
+        else:
             self.hidden2 = nn.Linear(in_features=self.n_hidden_filters, out_features=self.n_hidden_filters)
             init_weight(self.hidden2)
             self.hidden2.bias.data.zero_()
@@ -275,9 +303,9 @@ class PolicyNetwork(nn.Module):
         init_weight(self.log_std, initializer="xavier uniform")
         self.log_std.bias.data.zero_()
 
-    def forward(self, states):
+    def forward(self, states, weight):
         x = F.relu(self.hidden1(states))
-        x = F.relu(self.hidden2(x))
+        x = F.relu(x@weight)
 
         mu = self.mu(x)
         log_std = self.log_std(x)
@@ -285,8 +313,8 @@ class PolicyNetwork(nn.Module):
         dist = Normal(mu, std)
         return dist
 
-    def sample_or_likelihood(self, states):
-        dist = self(states)
+    def sample_or_likelihood(self, states, weight):
+        dist = self(states, weight)
         # Reparameterization trick
         u = dist.rsample()
         action = torch.tanh(u)
